@@ -1,4 +1,9 @@
-# jev
+# jev-mac
+
+> **Experimental.** This is a fun and research project that explores how far
+> Apple's on-device foundation models can go as a typed-decision engine. It is
+> not production software: answers can be confidently wrong, and some inputs are
+> refused outright. See *Known limits* before relying on it.
 
 A command-line typed-decision engine built on the architecture of
 [laya-mlx](https://deepwiki.com/mizorewww/laya-mlx), running only on Apple's
@@ -6,7 +11,7 @@ foundation models (the `FoundationModels` framework). It uses no third-party
 weights, no MLX and no Python.
 
 You pass in a **state** (free text or JSON) and a set of **typed questions**.
-jev returns a probability distribution for every question, not free text:
+jev-mac returns a probability distribution for every question, not free text:
 
 | type     | returns                                                        |
 |----------|----------------------------------------------------------------|
@@ -16,16 +21,18 @@ jev returns a probability distribution for every question, not free text:
 
 Requirements: macOS 27, Apple silicon, Apple Intelligence turned on, Xcode 27 toolchain.
 
+## Quick start
+
 ```bash
-swift build -c release
+make release
 ```
 
 ```bash
-.build/release/jev check
+make models
 ```
 
 ```bash
-.build/release/jev predict --preset triage --summary "I was billed twice this month. Please refund the duplicate charge."
+make run ARGS='predict --preset triage --summary "I was billed twice this month. Please refund the duplicate charge."'
 ```
 
 ```
@@ -41,28 +48,84 @@ Read the output as a decision with a rough confidence, not as calibrated
 probabilities. The on-device model often puts all the weight on its answer,
 including when that answer is wrong; see *Tests*.
 
+## Building with make
+
+Running `make` on its own lists every target and variable. The targets:
+
+| target | what it does |
+|---|---|
+| `make build` | debug build |
+| `make release` | optimized build (`.build/release/jev-mac`) |
+| `make test` or `make check` | deterministic tests: 577 cases, no model calls, under a second once built |
+| `make test-live` | live tests against the on-device model: 423 cases, about 8 minutes |
+| `make test-all` | all 1,000 test cases |
+| `make models` | describe the Apple foundation models on this Mac and time them |
+| `make snake` | play the snake demo in the terminal |
+| `make run ARGS='…'` | run jev-mac with any arguments |
+| `make bench` | triage preset latency, 10 warm runs |
+| `make bench-latency` | latency matrix, Open-Jev protocol (about 8 minutes) |
+| `make bench-fizzbuzz` | FizzBuzz control, 300 decisions (about 4 minutes) |
+| `make install` / `make uninstall` | copy jev-mac into `PREFIX/bin`, or remove it |
+| `make clean` | remove build products |
+
+The variables:
+
+| variable | meaning | default |
+|---|---|---|
+| `ARGS` | arguments for `run` and `snake` | none |
+| `PREFIX` | install prefix; the binary goes to `PREFIX/bin` | `/usr/local` |
+| `TEST_BUILD` | where the tests are built, outside iCloud Drive (its extended attributes break code-signing of the test bundle) | `/tmp/jev-mac-build` |
+| `SWIFT` | the swift driver | `swift` |
+
+Some examples:
+
+```bash
+make install PREFIX=~/.local
+```
+
+```bash
+make snake ARGS='--lean --fps 2'
+```
+
+```bash
+make snake ARGS='--headless --moves 50'
+```
+
+`make models` describes each Apple model on this Mac:
+
+- variant and context window;
+- capabilities (guided generation, tool calling, vision, reasoning);
+- supported languages, and whether your locale is one of them;
+- guardrail options and adapter support;
+- the system processes that host the model, with their memory and uptime;
+- Private Cloud Compute's context window and quota.
+
+It then times the on-device model (first request, time to first token,
+tokens/s and one jev-mac decision) and tries one small Private Cloud Compute
+request. `jev-mac check` alone skips the timing and makes no model requests.
+
 ## Architecture mapping
 
-| laya-mlx                                   | jev (Apple foundation models)                                                                                     |
+| laya-mlx                                   | jev-mac (Apple foundation models)                                                                                     |
 |--------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
-| `Agent` (load checkpoint, predict)         | `Agent`: routes, builds prompts, runs every question concurrently, calibrates ([Agent.swift](Sources/JevCore/Agent.swift)) |
-| `_to_internal` question validation         | `QuestionSet.parse` → `Question` / `Option` ([Question.swift](Sources/JevCore/Question.swift))                      |
-| `build_prefix` / `build_sequence`, `render_options`, `serialize_state`, `render_criterion` | `PromptBuilder` with the same functions; the prefix becomes the session instructions ([PromptBuilder.swift](Sources/JevCore/PromptBuilder.swift)) |
-| Bidirectional encoder + decision heads     | Guided generation with a `DynamicGenerationSchema` built per question ([DecisionHeads.swift](Sources/JevCore/DecisionHeads.swift)) |
+| `Agent` (load checkpoint, predict)         | `Agent`: routes, builds prompts, runs every question concurrently, calibrates ([Agent.swift](Sources/JevMac/Agent.swift)) |
+| `_to_internal` question validation         | `QuestionSet.parse` → `Question` / `Option` ([Question.swift](Sources/JevMac/Question.swift))                      |
+| `build_prefix` / `build_sequence`, `render_options`, `serialize_state`, `render_criterion` | `PromptBuilder` with the same functions; the prefix becomes the session instructions ([PromptBuilder.swift](Sources/JevMac/PromptBuilder.swift)) |
+| Bidirectional encoder + decision heads     | Guided generation with a `DynamicGenerationSchema` built per question ([DecisionHeads.swift](Sources/JevMac/DecisionHeads.swift)) |
 | Temperature calibration                    | Per-question `"temperature"`, applied as pᵢ^(1/T) and renormalized                                                 |
 | `confidence_from_probs`                    | 1 − normalized entropy                                                                                            |
-| `PrefixCache` (LRU of encoded prefixes)    | `PrefixCache`: an LRU of compiled prefix + schema, each with a pool of sessions reset to their instructions after every request, so the model can serve the prefix from its cache ([PrefixCache.swift](Sources/JevCore/PrefixCache.swift)) |
+| `PrefixCache` (LRU of encoded prefixes)    | `PrefixCache`: an LRU of compiled prefix + schema, each with a pool of sessions reset to their instructions after every request, so the model can serve the prefix from its cache ([PrefixCache.swift](Sources/JevMac/PrefixCache.swift)) |
 | Router over checkpoints                    | `Router` over Apple models: `on-device`, `tagging` (content-tagging adapter), `pcc` (Private Cloud Compute), `auto` |
 | Language detection                         | `NLLanguageRecognizer` plus `SystemLanguageModel.supportsLocale`                                                   |
 | Presets (triage, email, moderation)        | `triage`, `email`, `moderation`, `sentiment`                                                                        |
 | `collate_items` / `batch_size`             | `--batch FILE` (JSONL), processed `--batch-size` states at a time                                                  |
-| `laya-snake` demo + benchmark              | `jev snake` (TUI with a safety shield) and `jev snake --headless`, plus `jev bench`                                  |
+| `laya-snake` demo + benchmark              | `jev-mac snake` (TUI with a safety shield) and `jev-mac snake --headless`, plus `jev-mac bench`                                  |
 | `convert` (PyTorch → MLX)                  | Not needed. The model ships with macOS.                                                                             |
 
 ### Where it has to differ
 
 Apple's models do not expose logits or token log-probabilities, and a
-single forward pass is not available. jev reads distributions out through
+single forward pass is not available. jev-mac reads distributions out through
 constrained generation instead, using one of two heads:
 
 - **`distribution`** (default). One greedy call per question. The schema
@@ -80,7 +143,7 @@ constrained generation instead, using one of two heads:
   actual sampling rather than from numbers the model writes.
 
 If the on-device model refuses the `distribution` form of a question (this
-does happen on some inputs), jev falls back to `vote` for that question
+does happen on some inputs), jev-mac falls back to `vote` for that question
 automatically. The answer then reports `"head": "vote (fallback)"`.
 
 ### Measured on this Mac (AFM 3 Core Advanced, on-device, triage preset)
@@ -100,7 +163,7 @@ The model is not reloaded between calls. It stays resident in the system's
 inference service: during our runs that process kept one PID for 8+ days,
 used 1.0–1.7 GB of memory, and logged no load or unload events.
 
-jev keeps a pool of sessions per question. A session serves one request, is
+jev-mac keeps a pool of sessions per question. A session serves one request, is
 reset to its instructions, and waits for the next request with the same
 question, so the model can serve the instruction prefix from its cache. A
 session whose request failed is dropped. `--no-cache` goes back to a fresh
@@ -125,18 +188,18 @@ overhead) and with the number of options (the weights written out). Leaving
 the schema out of the prompt cuts the input to 239 tokens but makes the model
 write more (59 output tokens), so it is slower overall. After the service has
 been idle for a while, the first request pays about 0.4 s extra to warm up.
-`jev bench` excludes that with warmups; a one-shot `jev predict` does not.
+`jev-mac bench` excludes that with warmups; a one-shot `jev-mac predict` does not.
 
 ## Commands
 
 ```
-jev check                        model availability, variant, context size
-jev presets [NAME]               list presets / print one as JSON
-jev predict [STATE…] (--preset NAME | --questions FILE) [options]
-jev bench   [STATE…] [--preset NAME | --questions FILE] [--runs N] [options]
-jev bench   --suite latency [--warmups 3 --runs 20]   11-workload latency matrix
-jev bench   --suite fizzbuzz                          300 typed decisions, exact labels
-jev snake   [--fps N] [--max-speed] [--unassisted] [--lean] [--headless --moves N]
+jev-mac check [--measure]            describe the Apple models; --measure also times them
+jev-mac presets [NAME]               list presets / print one as JSON
+jev-mac predict [STATE…] (--preset NAME | --questions FILE) [options]
+jev-mac bench   [STATE…] [--preset NAME | --questions FILE] [--runs N] [options]
+jev-mac bench   --suite latency [--warmups 3 --runs 20]   11-workload latency matrix
+jev-mac bench   --suite fizzbuzz                          300 typed decisions, exact labels
+jev-mac snake   [--fps N] [--max-speed] [--unassisted] [--lean] [--headless --moves N]
 ```
 
 The state comes from the arguments, from `--state-file FILE|-`, or from stdin
@@ -174,7 +237,7 @@ See [Examples/questions.json](Examples/questions.json) and
 [Examples/reviews.jsonl](Examples/reviews.jsonl):
 
 ```bash
-.build/release/jev predict --questions Examples/questions.json --batch Examples/reviews.jsonl
+.build/release/jev-mac predict --questions Examples/questions.json --batch Examples/reviews.jsonl
 ```
 
 ## Output
@@ -197,7 +260,7 @@ Probabilities are rounded to four decimals, as in laya.
 
 ## Snake demo
 
-`jev snake` plays snake. At each step the engine computes facts for every
+`jev-mac snake` (or `make snake`) plays snake. At each step the engine computes facts for every
 move (legal, free space afterwards, food distance, food reachability), and
 the model answers three questions: `next_move` (choice), `safe_move`
 (noul; the DEAD-END RISK bar shows 1 − P) and `food_reachable` (noul). The safety shield executes the
@@ -218,7 +281,7 @@ and about 0.93 s with `--lean`.
   an unsigned CLI binary are rejected (`ModelManagerError 1046`). It probably
   needs a signed app with the Foundation Models entitlement. `--model auto`
   uses PCC only when a call would not fit the on-device context window.
-- **Language support.** jev flags languages the on-device model doesn't
+- **Language support.** jev-mac flags languages the on-device model doesn't
   support (for example Greek) with `"supported": false` and a warning, and
   answers for those states are unreliable.
 - **Answer quality.** It is limited by the ~3B on-device model. Use
@@ -226,14 +289,14 @@ and about 0.93 s with `--lean`.
 
 ## Tests
 
-There are 1,000 test cases in two layers. iCloud Drive adds extended
-attributes that break code-signing the test bundle, so build the tests outside
-the synced folder.
+There are 1,000 test cases in two layers (`make test-all` runs both). iCloud
+Drive adds extended attributes that break code-signing the test bundle, so the
+Makefile builds the tests in `/tmp/jev-mac-build`, outside the synced folder.
 
 **Deterministic (577 cases, under a second, no model calls):**
 
 ```bash
-swift test --scratch-path /tmp/jev-build
+make test
 ```
 
 These cover the JSON parser (strict RFC 8259, malformed surrogates, nesting
@@ -241,14 +304,14 @@ limit, interoperability with `JSONSerialization`), question validation,
 calibration math, prompt and schema building, the read-out layer (driven with
 model-shaped `GeneratedContent`), the prefix cache (checked against a
 reference LRU), every routing combination, language detection, the snake rules
-(checked against an independent oracle), the safety shield, and the real `jev`
+(checked against an independent oracle), the safety shield, and the real `jev-mac`
 binary's exit codes and messages. Random inputs come from fixed seeds, so every
 failure is reproducible.
 
-**Live (423 cases, about 15 minutes, on-device model):**
+**Live (423 cases, about 8 minutes, on-device model):**
 
 ```bash
-JEV_LIVE=1 swift test --scratch-path /tmp/jev-build --filter Live
+make test-live
 ```
 
 - **306 labeled states** across every preset, plus language identification,
@@ -264,7 +327,7 @@ within the rubric, and JSON output that agrees with the typed answer. A failure
 is labeled `INVALID OUTPUT` (a broken guarantee), `ENGINE ERROR` (the call
 failed) or `MODEL MISS` (valid output, wrong answer). When the suite finishes it
 prints accuracy per category and per question type, the Brier score for `noul`,
-and latency. It saves the full list of misses to `$TMPDIR/jev-live-report.txt`.
+and latency. It saves the full list of misses to `$TMPDIR/jev-mac-live-report.txt`.
 
 ### Latest live results (final engine)
 
@@ -294,7 +357,7 @@ optimistic. The FizzBuzz benchmark below is independent of them.
 
 ## Benchmarks
 
-`jev bench --suite latency` and `jev bench --suite fizzbuzz` reproduce the
+`jev-mac bench --suite latency` and `jev-mac bench --suite fizzbuzz` reproduce the
 shape of two suites from [Open-Jev's benchmarks](https://zefan-cai.github.io/open-jev/benchmarks/).
 The exact workload texts, JevBench tasks, JF100 and the remaining control
 suites are not public, so only these two can be reproduced. They are
@@ -303,12 +366,12 @@ reconstructions of the same shape, not the same inputs.
 **Latency** (3 warmups, 20 timed requests, concurrency 1, prefix cache off as in
 Open-Jev's protocol; P50 / P95 ms):
 
-| workload | jev on-device (this Mac) | Open-Jev 2B (H100) | Jev 1.13.0 (hosted) | GPT-5.6 Luna | GPT-6 Astra |
+| workload | jev-mac on-device (this Mac) | Open-Jev 2B (H100) | Jev 1.13.0 (hosted) | GPT-5.6 Luna | GPT-6 Astra |
 |---|---|---|---|---|---|
 | customer service, 8 boolean questions | 5506 / 5696 | 85 / 134 | 295 / 330 | 918 / 1443 | 1938 / 2376 |
 | 1,024 state tokens, 32 candidates | 6681 / 6770 | 1016 / 1370 | 301 / 361 | 690 / 788 | 1388 / 1741 |
 
-The full matrix (`jev bench --suite latency`) shows that the candidate count
+The full matrix (`jev-mac bench --suite latency`) shows that the candidate count
 drives latency, not the state size. Weights are written out one per option,
 so 32 candidates means about 290 output tokens and around 6 s whatever the
 state size. With 2 candidates, going from 128 to 1,024 state tokens costs only
@@ -316,7 +379,7 @@ state size. With 2 candidates, going from 128 to 1,024 state tokens costs only
 
 **FizzBuzz** (integers 1–100, 3 typed questions each):
 
-| | jev on-device | Jev 1.13.0 | GPT-5.6 Luna | GPT-6 Astra |
+| | jev-mac on-device | Jev 1.13.0 | GPT-5.6 Luna | GPT-6 Astra |
 |---|---|---|---|---|
 | correct | 172/300 (57.3%) | 299/300 | 300/300 | 300/300 |
 
@@ -327,3 +390,7 @@ Per question: divisible-by-3 75/100, divisible-by-5 57/100, FizzBuzz output
 The other systems' numbers are Open-Jev's published figures (read
 2026-09-23). They were measured on different hardware and inputs, so treat the
 comparison as an order of magnitude, not a matched speed-up.
+
+## License
+
+MIT; see [LICENSE](LICENSE).

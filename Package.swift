@@ -2,15 +2,15 @@
 import PackageDescription
 
 let package = Package(
-    name: "Jev",
+    name: "jev-mac",
     platforms: [.macOS("27.0")],
     products: [
-        .executable(name: "jev", targets: ["jev"]),
-        .library(name: "JevCore", targets: ["JevCore"]),
+        .executable(name: "jev-mac", targets: ["jev-mac"]),
+        .library(name: "JevMac", targets: ["JevMac"]),
     ],
     targets: [
-        .target(name: "JevCore"),
-        .executableTarget(name: "jev", dependencies: ["JevCore"]),
-        .testTarget(name: "JevCoreTests", dependencies: ["JevCore"]),
+        .target(name: "JevMac"),
+        .executableTarget(name: "jev-mac", dependencies: ["JevMac"]),
+        .testTarget(name: "JevMacTests", dependencies: ["JevMac"]),
     ]
 )
