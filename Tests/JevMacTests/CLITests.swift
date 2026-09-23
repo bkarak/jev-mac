@@ -55,6 +55,7 @@ struct CLITests {
         Case(args: ["snake", "--fps", "abc"], status: 2, stderr: "expects a number"),
         Case(args: ["snake", "--fps", "0"], status: 2, stderr: "--fps must be > 0"),
         Case(args: ["snake", "--headless", "--moves", "0"], status: 2, stderr: "--moves must be ≥ 1"),
+        Case(args: ["snake", "--headless", "--policy", "bogus"], status: 2, stderr: "--policy must be"),
     ]
 
     @Test("exit codes and messages", arguments: cases)

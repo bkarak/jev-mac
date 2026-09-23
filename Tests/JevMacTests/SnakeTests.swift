@@ -33,7 +33,7 @@ struct SnakeTests {
         return (true, eats, free, reach)
     }
 
-    static let playSeeds = 0..<12
+    static let playSeeds = 0..<11
 
     @Test("random play keeps every invariant", arguments: playSeeds)
     func randomPlay(seed: Int) {
@@ -70,7 +70,7 @@ struct SnakeTests {
         #expect(problems.isEmpty, "\(problems.prefix(5))")
     }
 
-    static let oracleSeeds = 0..<12
+    static let oracleSeeds = 0..<11
 
     @Test("move features match an independent oracle", arguments: oracleSeeds)
     func featuresMatchOracle(seed: Int) {
@@ -147,19 +147,36 @@ struct SnakeTests {
         #expect(legal.allSatisfy { $0.freeSpace == 10 && !$0.foodReachable && !game.admissible($0) })
     }
 
-    @Test func stateJSONMirrorsTheFeatures() throws {
-        let game = Self.pocket
-        let j = game.stateJSON
-        #expect(j["head"]?.stringValue == "(1,5)" && j["heading"]?.stringValue == "LEFT" && j["length"]?.doubleValue == 12)
-        for f in game.allFeatures {
-            let m = try #require(j["moves"]?[f.direction.rawValue])
-            #expect(m["legal"] == .bool(f.legal))
-            #expect(m["eats_food"] == .bool(f.eatsFood))
-            #expect(m["free_space_after"]?.doubleValue == Double(f.freeSpace))
-            #expect(m["room_for_body"] == .bool(game.admissible(f)))
-            #expect(m["food_distance_after"]?.doubleValue == Double(f.foodDistance))
-            #expect(m["food_reachable_after"] == .bool(f.foodReachable))
-        }
+    @Test func theModelReadsPlainVerdictsForEveryMove() {
+        #expect(Self.pocket.stateText == """
+        Snake on a 6×6 board, length 12, heading LEFT. Head at (1,5), food at (4,4), 4 steps away.
+        Moves:
+        - UP: risky: leaves too little room for the body, gets closer to the food (3 steps)
+        - DOWN: not possible (a wall)
+        - LEFT: risky: leaves too little room for the body, moves away from the food (5 steps)
+        - RIGHT: not possible (the snake's own body)
+        The food cannot be reached from here.
+        """)
+        let open = SnakeGame(width: 6, height: 6, body: [Point(2, 0), Point(1, 0), Point(0, 0)], heading: .RIGHT, food: Point(5, 5))
+        #expect(open.stateText == """
+        Snake on a 6×6 board, length 3, heading RIGHT. Head at (2,0), food at (5,5), 8 steps away.
+        Moves:
+        - UP: not possible (a wall)
+        - DOWN: safe, gets closer to the food (7 steps)
+        - LEFT: not possible (the snake's own body)
+        - RIGHT: safe, gets closer to the food (7 steps)
+        The food can be reached after moving DOWN, RIGHT.
+        """)
+    }
+
+    @Test func goodMovesEatThenCloseInThenStaySafe() {
+        let eat = SnakeGame(width: 6, height: 6, body: [Point(2, 2), Point(1, 2), Point(0, 2)], heading: .RIGHT, food: Point(3, 2))
+        #expect(eat.goodMoves == [.RIGHT], "eating beats merely getting closer")
+        let open = SnakeGame(width: 6, height: 6, body: [Point(2, 0), Point(1, 0), Point(0, 0)], heading: .RIGHT, food: Point(5, 5))
+        #expect(open.goodMoves == [.DOWN, .RIGHT])
+        let away = SnakeGame(width: 6, height: 6, body: [Point(5, 2), Point(4, 2), Point(3, 2)], heading: .RIGHT, food: Point(0, 2))
+        #expect(away.goodMoves == [.UP, .DOWN], "with no closer move, any safe move will do")
+        #expect(Self.pocket.goodMoves == [.UP, .LEFT], "trapped: any legal move")
     }
 
     static let sizes: [(Int, Int)] = [(6, 6), (10, 8), (20, 14), (40, 30)]

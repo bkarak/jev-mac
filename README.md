@@ -260,20 +260,48 @@ Probabilities are rounded to four decimals, as in laya.
 
 ## Snake demo
 
-`jev-mac snake` (or `make snake`) plays snake. At each step the engine computes facts for every
-move (legal, free space afterwards, food distance, food reachability), and
-the model answers three questions: `next_move` (choice), `safe_move`
-(noul; the DEAD-END RISK bar shows 1 − P) and `food_reachable` (noul). The safety shield executes the
-highest-probability move that is legal and leaves room for the body.
-`--unassisted` turns the shield off, and `--lean` asks only `next_move`
-(about 2× faster).
+`jev-mac snake` (or `make snake`) plays snake in the terminal. At every step
+the engine works out the facts for each move (is it legal, does it leave room
+for the body, does it eat the food or get closer to it, is the food still
+reachable) and describes them to the model in plain words:
+
+```
+Snake on a 16×12 board, length 4, heading RIGHT. Head at (5,4), food at (9,4), 4 steps away.
+Moves:
+- UP: safe, moves away from the food (5 steps)
+- DOWN: safe, moves away from the food (5 steps)
+- LEFT: not possible (the snake's own body)
+- RIGHT: safe, gets closer to the food (3 steps)
+The food can be reached after moving UP, DOWN, RIGHT.
+```
+
+The model answers three questions: `next_move` (choice), `safe_move` (noul;
+the DEAD-END RISK bar shows 1 − P) and `food_reachable` (noul). The safety
+shield executes the highest-probability move that is legal and leaves room
+for the body. `--unassisted` turns the shield off, and `--lean` asks only
+`next_move` (about 2.5× faster).
+
+The words matter. The first version gave the model raw numbers per move
+(`food_distance_after: 6`, `free_space_after: 188`, …). The model can't
+compare numbers across moves, so it fell back on the first option, UP, and
+circled a corner without ever reaching the food. Over the same 200-move game
+(16×12 board, seed 7, `--lean`):
+
+| player | food eaten | moved closer when that was safe | deaths |
+|---|---|---|---|
+| random safe move (`--policy random`) | 1 | 55% | 0 |
+| model, raw numbers (first version) | 0 in 40 moves | 42% | 0 |
+| greedy rule (`--policy greedy`) | 17 | 100% | 0 |
+| model, plain verdicts | **18** | **100%** (194/194) | 0 |
+
+`--policy random|greedy` runs these baselines without the model; `--trace`
+prints every decision of a headless run. The live test suite checks that
+`next_move` heads for the food whenever that is safe, not merely that it is
+safe (a check the first version would have failed).
 
 Controls: space to pause, ↑/↓ to change speed, r to reset, q to quit. The
-terminal needs to be about 90×22 with true color.
-
-Headless benchmark from this Mac: 25 moves, 0 deaths, 0 shield
-interventions. It averages about 2.0 s per decision with all three questions
-and about 0.93 s with `--lean`.
+terminal needs to be about 90×22 with true color. With all three questions a
+move takes about 2.4 s; with `--lean`, about 1 s.
 
 ## Known limits
 

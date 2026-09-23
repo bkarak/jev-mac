@@ -4,8 +4,13 @@ import Synchronization
 
 /// Terminal snake driven by typed decisions from Apple's foundation models.
 enum SnakeCommand {
-    static let switches = Args.engineSwitches.union(["max-speed", "unassisted", "headless", "lean"])
-    static let options = Args.engineOptions.union(["fps", "width", "height", "moves"])
+    static let switches = Args.engineSwitches.union(["max-speed", "unassisted", "headless", "lean", "trace"])
+    static let options = Args.engineOptions.union(["fps", "width", "height", "moves", "policy"])
+
+    /// Who picks the moves: the model, or a baseline to compare it with.
+    enum Policy: String {
+        case model, random, greedy
+    }
 
     struct Decision {
         var probabilities: [Direction: Double]
@@ -18,6 +23,8 @@ enum SnakeCommand {
 
     struct Stats {
         var moves = 0, deaths = 0, interventions = 0, food = 0, best = 0
+        /// Moves where a safe move closer to the food existed, and how many took one.
+        var closerAvailable = 0, closerTaken = 0
         var latencies: [Double] = []
         let started = ContinuousClock.now
 
@@ -31,8 +38,30 @@ enum SnakeCommand {
         }
     }
 
+    /// A baseline decision: a random safe move, or the safe move that gets closest to the food.
+    static func baseline(_ policy: Policy, _ game: SnakeGame, _ rng: inout SplitMix64) -> Decision {
+        let feats = game.allFeatures
+        let safe = feats.filter { game.admissible($0) }
+        let pool = safe.isEmpty ? feats.filter(\.legal) : safe
+        let pick: MoveFeatures? = policy == .random
+            ? pool.randomElement(using: &rng)
+            : pool.min { ($0.eatsFood ? -1 : $0.foodDistance) < ($1.eatsFood ? -1 : $1.foodDistance) }
+        let move = pick?.direction ?? .UP
+        return Decision(probabilities: [move: 1], deadEndRisk: nil, foodReachable: nil,
+                        move: move, intervened: false, latencyMs: 0)
+    }
+
+    /// Records whether the move closed in on the food when a safe way to do so existed.
+    static func track(_ stats: inout Stats, _ game: SnakeGame, _ move: Direction) {
+        let now = abs(game.head.x - game.food.x) + abs(game.head.y - game.food.y)
+        let feats = game.allFeatures
+        guard feats.contains(where: { game.admissible($0) && $0.foodDistance < now }) else { return }
+        stats.closerAvailable += 1
+        if game.features(move).foodDistance < now { stats.closerTaken += 1 }
+    }
+
     static func decide(_ agent: Agent, _ questions: [Question], _ game: SnakeGame, assisted: Bool) async throws -> Decision {
-        let p = try await agent.predict(state: game.stateJSON, questions)
+        let p = try await agent.predict(state: .string(game.stateText), questions)
         guard let move = p["next_move"] else { throw UsageError("model returned no next_move") }
         var probs: [Direction: Double] = [:]
         for d in Direction.allCases { probs[d] = move.probability(of: d.rawValue) }
@@ -61,9 +90,12 @@ enum SnakeCommand {
 
         try await agent.warm(questions)
 
+        guard let policy = Policy(rawValue: args.string("policy") ?? "model") else {
+            throw UsageError("--policy must be model, random or greedy")
+        }
         if args.flag("headless") {
             try await headless(agent, questions, width: width, height: height, seed: seed,
-                               moves: moves, assisted: assisted)
+                               moves: moves, assisted: assisted, policy: policy, trace: args.flag("trace"))
             return
         }
 
@@ -98,6 +130,7 @@ enum SnakeCommand {
                 last = d
                 stats.latencies.append(d.latencyMs)
                 if d.intervened { stats.interventions += 1 }
+                track(&stats, game, d.move)
                 let r = game.step(d.move)
                 stats.moves += 1
                 if r.ate { stats.food += 1 }
@@ -125,14 +158,25 @@ enum SnakeCommand {
         print(summary(stats))
     }
 
-    static func headless(_ agent: Agent, _ questions: [Question], width: Int, height: Int, seed: UInt64, moves: Int, assisted: Bool) async throws {
+    static func headless(_ agent: Agent, _ questions: [Question], width: Int, height: Int, seed: UInt64, moves: Int,
+                         assisted: Bool, policy: Policy = .model, trace: Bool = false) async throws {
         var game = SnakeGame(width: width, height: height, seed: seed)
         var stats = Stats()
         var s = seed
+        var rng = SplitMix64(seed: seed)
         for i in 1...max(1, moves) {
-            let d = try await decide(agent, questions, game, assisted: assisted)
+            let d = policy == .model ? try await decide(agent, questions, game, assisted: assisted)
+                                     : baseline(policy, game, &rng)
             stats.latencies.append(d.latencyMs)
             if d.intervened { stats.interventions += 1 }
+            track(&stats, game, d.move)
+            if trace {
+                let dist = abs(game.head.x - game.food.x) + abs(game.head.y - game.food.y)
+                let probs = Direction.allCases.map { "\($0.rawValue) \(String(format: "%.2f", d.probabilities[$0] ?? 0))" }
+                let next = game.features(d.move).foodDistance
+                printErr("\(i): head (\(game.head.x),\(game.head.y)) food (\(game.food.x),\(game.food.y)) distance \(dist) · "
+                         + probs.joined(separator: " ") + " → \(d.move.rawValue)\(d.intervened ? " (shield)" : "") · distance \(next)")
+            }
             let r = game.step(d.move)
             stats.moves += 1
             if r.ate { stats.food += 1 }
@@ -142,7 +186,7 @@ enum SnakeCommand {
                 s &+= 1
                 game = SnakeGame(width: width, height: height, seed: s)
             }
-            FileHandle.standardError.write(Data("\rmove \(i)/\(moves)".utf8))
+            if !trace { FileHandle.standardError.write(Data("\rmove \(i)/\(moves)".utf8)) }
         }
         printErr("")
         print(summary(stats))
@@ -151,6 +195,8 @@ enum SnakeCommand {
     static func summary(_ s: Stats) -> String {
         String(format: "%d moves · %.2f moves/s · median decision %.0f ms · food %d · best score %d · deaths %d · shield interventions %d",
                s.moves, Double(s.moves) / max(0.001, s.elapsedSeconds), s.medianMs, s.food, s.best, s.deaths, s.interventions)
+            + String(format: " · closed in on the food in %d of %d moves where that was safe (%.0f%%)",
+                     s.closerTaken, s.closerAvailable, 100 * Double(s.closerTaken) / Double(max(1, s.closerAvailable)))
     }
 
     // MARK: Rendering

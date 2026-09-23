@@ -33,18 +33,21 @@ enum LiveSnake {
         return normal + trapped
     }()
 
+    /// The move is only right if it heads for the food when that is safe
+    /// (`goodMoves`); accepting any safe move let a snake that circled a corner
+    /// forever pass.
     static let cases: [LiveCase] = positions.enumerated().flatMap { i, game -> [LiveCase] in
         let legal = game.allFeatures.filter(\.legal)
         let safe = legal.filter { game.admissible($0) }
-        let acceptable = (safe.isEmpty ? legal : safe).map(\.direction.rawValue)
+        let state = JSON.string(game.stateText)
         let id = "snake#\(i < 9 ? "0" : "")\(i + 1)"
         return [
             LiveCase(id: id + ".next_move", category: "snake.next_move", question: questions[0],
-                     state: game.stateJSON, expect: .anyOf(acceptable)),
+                     state: state, expect: .anyOf(game.goodMoves.map(\.rawValue))),
             LiveCase(id: id + ".safe_move", category: "snake.safe_move", question: questions[1],
-                     state: game.stateJSON, expect: .truth(!safe.isEmpty)),
+                     state: state, expect: .truth(!safe.isEmpty)),
             LiveCase(id: id + ".food", category: "snake.food_reachable", question: questions[2],
-                     state: game.stateJSON, expect: .truth(legal.contains { $0.foodReachable })),
+                     state: state, expect: .truth(legal.contains { $0.foodReachable })),
         ]
     }
 }

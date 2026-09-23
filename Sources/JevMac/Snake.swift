@@ -140,47 +140,67 @@ public struct SnakeGame: Sendable {
         return (false, false)
     }
 
-    /// The state the model reads: board facts plus per-move features.
-    public var stateJSON: JSON {
-        let moves = allFeatures.map { f -> (String, JSON) in
-            (f.direction.rawValue, .object([
-                ("legal", .bool(f.legal)),
-                ("eats_food", .bool(f.eatsFood)),
-                ("free_space_after", .number(Double(f.freeSpace))),
-                ("room_for_body", .bool(admissible(f))),
-                ("food_distance_after", .number(Double(f.foodDistance))),
-                ("food_reachable_after", .bool(f.foodReachable)),
-            ]))
+    /// The state the model reads: the board in one line, then one line per
+    /// move with plain verdicts. The on-device model cannot compare numbers
+    /// across moves reliably (given raw distances it favoured the first move,
+    /// UP, and circled a corner), so the engine states the comparisons in words:
+    /// "safe", "gets closer to the food". The model still makes the choice.
+    public var stateText: String {
+        let distance = abs(head.x - food.x) + abs(head.y - food.y)
+        var lines = [
+            "Snake on a \(width)×\(height) board, length \(length), heading \(heading.rawValue). "
+                + "Head at (\(head.x),\(head.y)), food at (\(food.x),\(food.y)), \(distance) steps away.",
+            "Moves:",
+        ]
+        for f in allFeatures {
+            let verdict: String
+            if !f.legal {
+                verdict = "not possible (" + (inBounds(head.moved(f.direction)) ? "the snake's own body" : "a wall") + ")"
+            } else {
+                let safety = admissible(f) ? "safe" : "risky: leaves too little room for the body"
+                let food = f.eatsFood ? "eats the food"
+                    : f.foodDistance < distance ? "gets closer to the food (\(f.foodDistance) steps)"
+                    : "moves away from the food (\(f.foodDistance) steps)"
+                verdict = safety + ", " + food
+            }
+            lines.append("- \(f.direction.rawValue): \(verdict)")
         }
-        return .object([
-            ("board", .string("\(width)x\(height), x grows right, y grows down")),
-            ("head", .string("(\(head.x),\(head.y))")),
-            ("heading", .string(heading.rawValue)),
-            ("food", .string("(\(food.x),\(food.y))")),
-            ("length", .number(Double(length))),
-            ("moves", .object(moves)),
-        ])
+        let reachable = allFeatures.filter { $0.legal && $0.foodReachable }.map(\.direction.rawValue)
+        lines.append(reachable.isEmpty ? "The food cannot be reached from here."
+                                       : "The food can be reached after moving \(reachable.joined(separator: ", ")).")
+        return lines.joined(separator: "\n")
+    }
+
+    /// The moves a good player would pick: a safe move that eats the food, else
+    /// a safe move that gets closer, else any safe move, else any legal move.
+    public var goodMoves: [Direction] {
+        let distance = abs(head.x - food.x) + abs(head.y - food.y)
+        let feats = allFeatures
+        let safe = feats.filter { admissible($0) }
+        for tier in [safe.filter(\.eatsFood), safe.filter { $0.foodDistance < distance }, safe, feats.filter(\.legal)]
+            where !tier.isEmpty { return tier.map(\.direction) }
+        return []
     }
 
     public static let questionsJSON = """
     {
       "next_move": {
         "type": "choice",
-        "instructions": "Pick the snake's next move. Never pick a move whose legal is false. Among legal moves prefer those with room_for_body true, then eats_food true, then the smallest food_distance_after.",
+        "instructions": "Pick the snake's next move. Choose only a move marked safe. Among the safe moves, prefer one that eats the food, then one that gets closer to the food.",
         "criteria": {
-          "UP": "move the head one cell up (y-1)",
-          "DOWN": "move the head one cell down (y+1)",
-          "LEFT": "move the head one cell left (x-1)",
-          "RIGHT": "move the head one cell right (x+1)"
+          "UP": "move the head one cell up",
+          "DOWN": "move the head one cell down",
+          "LEFT": "move the head one cell left",
+          "RIGHT": "move the head one cell right"
         }
       },
       "safe_move": {
         "type": "noul",
-        "instructions": "At least one legal move has room_for_body true."
+        "instructions": "At least one move is marked safe."
       },
       "food_reachable": {
         "type": "noul",
-        "instructions": "At least one legal move has food_reachable_after true."
+        "instructions": "The food can still be reached."
       }
     }
     """

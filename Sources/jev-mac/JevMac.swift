@@ -43,6 +43,8 @@ OUTPUT
 SNAKE
   --fps N   --max-speed   --unassisted (disable safety shield)   --lean (next_move only)
   --width W --height H    --seed N     --headless --moves N (benchmark, no UI)
+  --policy model|random|greedy   who picks the moves in headless runs (baselines need no model)
+  --trace                        print every headless decision
 """
 
 @main
