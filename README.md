@@ -77,6 +77,18 @@ The variables:
 | `TEST_BUILD` | where the tests are built, outside iCloud Drive (its extended attributes break code-signing of the test bundle) | `/tmp/jev-mac-build` |
 | `SWIFT` | the swift driver | `swift` |
 
+Every benchmark target (`bench`, `bench-latency`, `bench-fizzbuzz`, and
+`snake` with `ARGS='--headless …'`) first prints what it runs on:
+
+```
+machine     Apple M4 Max (Mac16,5) · 16 CPU cores (12 performance + 4 efficiency) · 40 GPU cores · 64 GB memory
+conditions  macOS 27.0 (26A428) · AC power (battery 80%) · Low Power Mode off · thermal nominal · load 2.14 · memory pressure normal
+model       AFM 3 Core Advanced (on-device) · 8,192-token context
+```
+
+It repeats the conditions at the end, and prints a warning when the machine
+is busy, on battery, in Low Power Mode, throttled or short of memory.
+
 Some examples:
 
 ```bash
@@ -91,7 +103,8 @@ make snake ARGS='--lean --fps 2'
 make snake ARGS='--headless --moves 50'
 ```
 
-`make models` describes each Apple model on this Mac:
+`make models` describes this Mac (chip, cores, memory, macOS, power and
+thermal conditions) and each Apple model on it:
 
 - variant and context window;
 - capabilities (guided generation, tool calling, vision, reasoning);
@@ -146,7 +159,7 @@ If the on-device model refuses the `distribution` form of a question (this
 does happen on some inputs), jev-mac falls back to `vote` for that question
 automatically. The answer then reports `"head": "vote (fallback)"`.
 
-### Measured on this Mac (AFM 3 Core Advanced, on-device, triage preset)
+### Measured on this Mac (MacBook Pro, Apple M4 Max, 64 GB · AFM 3 Core Advanced · triage preset)
 
 | mode                                   | warm median / prediction (3 questions) | notes                                      |
 |----------------------------------------|----------------------------------------|--------------------------------------------|
@@ -359,14 +372,17 @@ and latency. It saves the full list of misses to `$TMPDIR/jev-mac-live-report.tx
 
 ### Latest live results (final engine)
 
-| | answer-free weights (initial) | + answer first | + yes/no framing for noul, reworded snake question |
-|---|---|---|---|
-| labeled accuracy | 80.6% | 86.1% | **90.9%** (360/396) |
-| choice / score / noul | 83.3% / 78.0% / 78.5% | 92.5% / 92.0% / 77.9% | 92.5% / 92.0% / 89.0% |
-| noul Brier score | 0.202 | 0.208 | 0.099 |
-| invalid outputs | 0 | 0 | 0 |
-| guardrail-blocked calls | 3 | 7 | 7 |
-| median latency per question | 732 ms | 937 ms | 939 ms |
+| | answer-free weights (initial) | + answer first | + yes/no framing for noul, reworded snake question | + plain-language snake state |
+|---|---|---|---|---|
+| labeled accuracy | 80.6% | 86.1% | 90.9% (360/396) | **91.2%** (361/396) |
+| choice / score / noul | 83.3% / 78.0% / 78.5% | 92.5% / 92.0% / 77.9% | 92.5% / 92.0% / 89.0% | 92.5% / 92.0% / 89.5% |
+| noul Brier score | 0.202 | 0.208 | 0.099 | 0.093 |
+| invalid outputs | 0 | 0 | 0 | 0 |
+| guardrail-blocked calls | 3 | 7 | 7 | 7 |
+| median latency per question | 732 ms | 937 ms | 939 ms | 930 ms |
+
+The last column also uses the stricter snake check (the move must head for the
+food when that is safe), and still scores 30/30 on it.
 
 All 27 end-to-end checks pass in every run. Switching to pooled sessions changed
 no answer (the same 36 misses) and lowered the median to 916 ms per question.
@@ -384,6 +400,19 @@ These cases also guided the two prompt fixes, so the last column is somewhat
 optimistic. The FizzBuzz benchmark below is independent of them.
 
 ## Benchmarks
+
+**Test machine.** Every timing in this README was measured on one machine:
+
+- **Mac:** a MacBook Pro (Mac16,5) with an Apple M4 Max.
+- **Cores:** 16 CPU cores (12 performance + 4 efficiency) and 40 GPU cores.
+- **Memory:** 64 GB.
+- **Software and power:** macOS 27.0 (26A428), running on AC power.
+
+Timings on another Mac will differ. The benchmarks record where they ran:
+`jev-mac bench`, headless `jev-mac snake` and the live test report print the
+machine and the conditions of the run. The conditions are power source, Low
+Power Mode, thermal state, load and memory pressure. They are repeated at the
+end, and a warning appears when they would skew the timings.
 
 `jev-mac bench --suite latency` and `jev-mac bench --suite fizzbuzz` reproduce the
 shape of two suites from [Open-Jev's benchmarks](https://zefan-cai.github.io/open-jev/benchmarks/).

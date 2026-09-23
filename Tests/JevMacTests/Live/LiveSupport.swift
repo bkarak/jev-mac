@@ -177,7 +177,9 @@ actor LiveLedger {
 
         var order: [String] = []
         for r in rows where !order.contains(r.category) { order.append(r.category) }
-        var out = ["", "── jev-mac live validity report " + String(repeating: "─", count: 44)]
+        let hardware = Hardware.current()
+        var out = ["", "── jev-mac live validity report " + String(repeating: "─", count: 44),
+                   "machine     " + hardware.machine, "conditions  " + hardware.conditions, ""]
         out.append(pad("category", 24) + lpad("n", 5) + lpad("correct", 9) + lpad("accuracy", 10) + lpad("p(ok)", 8) + lpad("errors", 8))
         for cat in order {
             let rs = rows.filter { $0.category == cat }

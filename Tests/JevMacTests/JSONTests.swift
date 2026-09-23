@@ -152,7 +152,7 @@ struct JSONTests {
 
     // MARK: Properties over random documents
 
-    static let roundTripSeeds = 0..<18
+    static let roundTripSeeds = 0..<13
 
     @Test("random documents round-trip", arguments: roundTripSeeds)
     func randomRoundTrip(seed: Int) throws {

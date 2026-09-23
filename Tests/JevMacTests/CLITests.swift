@@ -79,7 +79,8 @@ struct CLITests {
     @Test func checkDescribesEveryModel() throws {
         let r = try CLI.run(["check"])
         #expect(r.status == 0)
-        for text in ["On-device · SystemLanguageModel", "Private Cloud Compute · PrivateCloudComputeLanguageModel",
+        for text in ["This Mac", "machine", "conditions", "On-device · SystemLanguageModel",
+                     "Private Cloud Compute · PrivateCloudComputeLanguageModel",
                      "context", "capabilities", "languages", "quota", "jev-mac check --measure"] {
             #expect(r.stdout.contains(text), "missing \(text)")
         }

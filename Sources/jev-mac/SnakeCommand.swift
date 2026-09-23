@@ -156,10 +156,13 @@ enum SnakeCommand {
         }
         term.leave()
         print(summary(stats))
+        print("machine     " + Hardware.current().machine)
     }
 
     static func headless(_ agent: Agent, _ questions: [Question], width: Int, height: Int, seed: UInt64, moves: Int,
                          assisted: Bool, policy: Policy = .model, trace: Bool = false) async throws {
+        if policy == .model { Commands.printEnvironment(agent.router) } else { print("machine     " + Hardware.current().machine) }
+        print("policy      \(policy.rawValue)\(policy == .model ? (questions.count == 1 ? " · next_move only" : " · \(questions.count) questions") : "")\n")
         var game = SnakeGame(width: width, height: height, seed: seed)
         var stats = Stats()
         var s = seed
@@ -190,6 +193,7 @@ enum SnakeCommand {
         }
         printErr("")
         print(summary(stats))
+        Commands.printEndConditions()
     }
 
     static func summary(_ s: Stats) -> String {
@@ -200,6 +204,9 @@ enum SnakeCommand {
     }
 
     // MARK: Rendering
+
+    /// The model and the chip it runs on, for the panel title.
+    static let panelTitle = "\(Router().onDeviceVariant) on \(Hardware.current().chip)"
 
     static func rgb(_ r: Int, _ g: Int, _ b: Int) -> String { "\u{1B}[48;2;\(r);\(g);\(b)m" }
     static let reset = "\u{1B}[0m"
@@ -226,7 +233,7 @@ enum SnakeCommand {
         lines.append("└" + String(repeating: "──", count: g.width) + "┘")
 
         var panel = [
-            "JEV-MAC SNAKE · Apple foundation models",
+            "JEV-MAC SNAKE · " + panelTitle,
             "",
             "score \(g.score)   length \(g.length)   best \(s.best)",
             "",

@@ -16,6 +16,12 @@ enum Commands {
         let os = ProcessInfo.processInfo.operatingSystemVersion
         print("Apple foundation models · macOS \(os.majorVersion).\(os.minorVersion) · locale \(Locale.current.identifier)")
 
+        let hardware = Hardware.current()
+        section("This Mac", nil)
+        row("machine", hardware.machine)
+        row("conditions", hardware.conditions)
+        for w in hardware.warnings { row("warning", w) }
+
         section("On-device", "SystemLanguageModel")
         row("status", od.status)
         if let v = od.variant { row("model", "\(v) · variants: \(ModelInfo.variants.joined(separator: ", "))") }
@@ -60,6 +66,20 @@ enum Commands {
         }
         let probe = await ModelInfo.probePrivateCloudCompute(router)
         row("PCC request", probe.ok ? probe.detail : "rejected: " + probe.detail)
+    }
+
+    /// What the numbers are measured on; printed before every benchmark.
+    static func printEnvironment(_ router: Router) {
+        let hardware = Hardware.current()
+        print("machine     " + hardware.machine)
+        print("conditions  " + hardware.conditions)
+        print("model       \(router.onDeviceVariant) (on-device) · \(grouped(router.onDeviceContextSize))-token context")
+        for w in hardware.warnings { print("warning     " + w) }
+    }
+
+    /// Power, heat and load can drift during a long run; printed after it.
+    static func printEndConditions() {
+        print("at the end  " + Hardware.current().drift)
     }
 
     static func section(_ title: String, _ api: String?) {
@@ -251,7 +271,8 @@ enum Commands {
         var config = try args.agentConfig()
         config.useCache = false
         let agent = Agent(config: config)
-        print("Latency protocol · \(warmups) warmups · \(runs) timed requests · concurrency 1 · prefix cache off · \(agent.router.onDeviceVariant)")
+        printEnvironment(agent.router)
+        print("protocol    \(warmups) warmups · \(runs) timed requests · concurrency 1 · prefix cache off\n")
         let workloads = try await Workloads.matrix()
         func pad(_ s: String, _ w: Int) -> String { s.count >= w ? s : s + String(repeating: " ", count: w - s.count) }
         func lpad(_ s: String, _ w: Int) -> String { s.count >= w ? s : String(repeating: " ", count: w - s.count) + s }
@@ -264,14 +285,17 @@ enum Commands {
                   + lpad(String(format: "%.0f", s.inputTokensPerRequest), 8) + lpad(String(format: "%.0f", s.outputTokensPerRequest), 9)
                   + lpad(String(format: "%.1f", s.p50), 9) + lpad(String(format: "%.1f", s.p95), 9))
         }
+        print("")
+        printEndConditions()
     }
 
     /// The FizzBuzz control: 100 integers × 3 typed questions, exact ground truth.
     static func benchFizzBuzz(_ args: Args) async throws {
         let agent = Agent(config: try args.agentConfig())
+        printEnvironment(agent.router)
         let r = await FizzBuzzSuite.run(agent: agent) { n in FileHandle.standardError.write(Data("\r  n = \(n)/100".utf8)) }
         printErr("")
-        print("FizzBuzz control · integers 1–100 · 3 typed questions · \(r.total * FizzBuzzSuite.questions.count) decisions")
+        print("\nFizzBuzz control · integers 1–100 · 3 typed questions · \(r.total * FizzBuzzSuite.questions.count) decisions")
         for q in FizzBuzzSuite.questions {
             print("  \(q.name.padding(toLength: 6, withPad: " ", startingAt: 0)) \(r.correct[q.name, default: 0])/\(r.total)")
         }
@@ -280,6 +304,8 @@ enum Commands {
         if r.errors > 0 { print("  errors \(r.errors)") }
         for m in r.misses.prefix(12) { print("  miss   \(m)") }
         if r.misses.count > 12 { print("  … \(r.misses.count - 12) more") }
+        print("")
+        printEndConditions()
     }
 
     static func benchPreset(_ args: Args) async throws {
@@ -290,7 +316,8 @@ enum Commands {
         let state = args.positional.isEmpty ? benchState : args.positional.joined(separator: " ")
         let agent = Agent(config: try args.agentConfig())
 
-        print("Benchmarking \(questions.count) questions × \(runs) runs (head=\(agent.config.head.rawValue), cache=\(agent.config.useCache ? "on" : "off"))")
+        printEnvironment(agent.router)
+        print("\nBenchmarking \(questions.count) questions × \(runs) runs (head=\(agent.config.head.rawValue), cache=\(agent.config.useCache ? "on" : "off"))")
         let cold = try await agent.predict(state, questions)
         print(String(format: "  cold   %.0f ms (%@)", cold.latencyMs, cold.route.rawValue))
 
@@ -315,5 +342,7 @@ enum Commands {
         let stats = await agent.cacheStats
         print("  cache  \(stats.hits) hits · \(stats.misses) misses · \(stats.entries) prefixes · "
               + "\(stats.reused) sessions reused · \(stats.created) created")
+        print("")
+        printEndConditions()
     }
 }
