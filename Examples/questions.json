@@ -1,0 +1,22 @@
+{
+  "topic": {
+    "type": "choice",
+    "instructions": "What is this review mainly about?",
+    "criteria": {
+      "battery": "battery life and charging",
+      "display": "screen quality and brightness",
+      "performance": "speed, lag, heat",
+      "price": "cost and value for money"
+    }
+  },
+  "rating": {
+    "type": "score",
+    "instructions": "What star rating does the reviewer imply?",
+    "levels": ["1 star", "2 stars", "3 stars", "4 stars", "5 stars"],
+    "temperature": 1.5
+  },
+  "would_recommend": {
+    "type": "noul",
+    "instructions": "The reviewer would recommend the product to a friend."
+  }
+}
