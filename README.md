@@ -10,6 +10,9 @@ A command-line typed-decision engine built on the architecture of
 foundation models (the `FoundationModels` framework). It uses no third-party
 weights, no MLX and no Python.
 
+How it was built, and what it found about Apple's foundation models:
+[Porting a typed-decision engine to Apple's foundation models: a thousand tests and the limits](https://bkarak.wizhut.tech/blog/2026/23092026).
+
 You pass in a **state** (free text or JSON) and a set of **typed questions**.
 jev-mac returns a probability distribution for every question, not free text:
 
